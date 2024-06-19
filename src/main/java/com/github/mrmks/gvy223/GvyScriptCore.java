@@ -17,10 +17,13 @@ import javax.script.ScriptException;
 import java.io.PrintWriter;
 import java.io.Writer;
 import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.security.PrivilegedAction;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 public final class GvyScriptCore {
 
@@ -28,16 +31,31 @@ public final class GvyScriptCore {
 
     private final CompilerConfiguration config;
     private final GroovyClassLoader loader;
+    private final Supplier<String> nameSup;
 
     private final ConcurrentHashMap<String, Class<?>> classMap = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, MethodClosure> globalMethodMap = new ConcurrentHashMap<>();
 
-    public GvyScriptCore(CompilerConfiguration config) {
-        this.config = config == null ? new CompilerConfiguration(CompilerConfiguration.DEFAULT) : config;
+    public GvyScriptCore(CompilerConfiguration cfg, Supplier<String> nameSup) {
+        this.config = cfg == null ? new CompilerConfiguration(CompilerConfiguration.DEFAULT) : cfg;
         this.loader = getClassLoader(this.config);
+
+        this.nameSup = nameSup == null ? () -> "Script" + COUNTER.getAndIncrement() + ".groovy" : nameSup;
     }
 
-    public GvyScriptCore() { this(null); }
+    public GvyScriptCore(Supplier<String> nameSup) {
+        this(null, nameSup);
+    }
+
+    public GvyScriptCore(CompilerConfiguration config) {
+        this(config, null);
+    }
+
+    public GvyScriptCore() { this(null, null); }
+
+    public ClassLoader makeProxyClassLoader() {
+        return new URLClassLoader(new URL[]{}, this.loader);
+    }
 
     public Object eval(ScriptContext ctx, String script) throws ScriptException {
         // here, in official groovy jsr223 implementation, the entry of the map
@@ -143,13 +161,13 @@ public final class GvyScriptCore {
     }
 
     // methods used to eval a class;
-    private static String generateScriptName(ScriptContext context) {
+    private String generateScriptName(ScriptContext context) {
         if (context == null)
-            return generateScriptNameByCounter();
+            return generateFromSupplier();
 
         Object obj = context.getAttribute(ScriptEngine.FILENAME, ScriptContext.ENGINE_SCOPE);
         if (obj == null)
-            return generateScriptNameByCounter();
+            return generateFromSupplier();
 
         String name = obj.toString();
 
@@ -159,8 +177,8 @@ public final class GvyScriptCore {
         return name;
     }
 
-    private static String generateScriptNameByCounter() {
-        return "Script" + COUNTER.getAndIncrement() + ".groovy";
+    private String generateFromSupplier() {
+        return nameSup.get();
     }
 
     private void updateCompilerCfg(ScriptContext ctx) {
